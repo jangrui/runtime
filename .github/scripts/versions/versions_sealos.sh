@@ -39,7 +39,13 @@ fetch_sealos_tags
 readonly defaultVersion="$(head -n 1 .tags | cut -dv -f2)"
 
 if [[ "${SEALOS_VERSION:-}" == latest ]]; then
-  sealosVersion=latest
+  # Fork fix: "latest" must resolve to the newest final tag (e.g. 5.1.2).
+  # Passing the literal string "latest" through makes kubernetes.sh take
+  # its unstable branch (floating v<minor>-<arch> tag only) and makes the
+  # manifest job build version "<kube>-latest", e.g. 1.34.13-latest.
+  # The workflow input itself documents "empty or latest means latest
+  # Sealos tag", so resolve it here.
+  sealosVersion="$defaultVersion"
 elif [[ -n "${SEALOS_VERSION:-}" ]]; then
   sealosVersion="${SEALOS_VERSION#v}"
 else
