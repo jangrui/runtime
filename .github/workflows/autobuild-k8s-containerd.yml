@@ -47,7 +47,7 @@ env:
   part: ${{ inputs.part }}
   allBuild: ${{ inputs.allbuild }}
   registry: ghcr.io
-  repo: ${{ github.repository }}
+  repo: jangrui/kubernetes  # fork: upstream uses ${{ github.repository }} (= labring-actions/runtime) so image is ghcr.io/labring-actions/runtime/kubernetes (org package); in a personal fork that becomes ghcr.io/jangrui/runtime/kubernetes, a 3-level path GHCR rejects with 'installation not allowed to Create organization package'. Use the 2-level user package ghcr.io/jangrui/kubernetes instead, matching upstream labring/kubernetes naming.
   sealosPatch: ${{ inputs.sealosPatch }}
   criType: containerd
   kubeVersion: ${{ inputs.kubeVersion }}
