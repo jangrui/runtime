@@ -117,7 +117,13 @@ jobs:
           sudo kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
           sudo kubectl wait --for=condition=Ready node --all --timeout=600s
           sudo kubectl wait --for=condition=Ready pod -n kube-system -l k8s-app=kube-dns --timeout=600s
-          sudo kubectl wait --for=condition=Ready pod -n kube-system -l k8s-app=calico-node --timeout=600s
+          # calico-node pods are NOT in kube-system under label k8s-app=calico-node
+          # in calico v3.28 (run #4 failed here with "no matching resources found"
+          # while node Ready + CoreDNS Ready already proved CNI works).
+          # Diagnostic only, never a gate: show where calico-node actually runs.
+          sudo kubectl get pods -A -l k8s-app=calico-node -o wide || true
+          sudo kubectl get pods -A | grep -i calico || true
+          # The nginx pod itself is the real CNI proof: it needs an IP and HTTP.
           sudo kubectl run nginx-test --image=nginx:1.27-alpine --port=80
           sudo kubectl wait --for=condition=Ready pod/nginx-test --timeout=300s
           # CNI must have assigned the pod an IP
