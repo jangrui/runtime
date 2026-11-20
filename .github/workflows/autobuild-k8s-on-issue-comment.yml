@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Check for 'accepted' label
         id: check-label
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             const { data: issue } = await github.rest.issues.get({
@@ -41,7 +41,7 @@ jobs:
     steps:
       - name: Parse /imagebuild_k8s command
         id: parse
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             const body = (context.payload.comment.body || '').trim();
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Reply accepted
-        uses: actions/github-script@v6
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.createComment({
