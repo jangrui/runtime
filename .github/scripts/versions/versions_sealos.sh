@@ -18,7 +18,25 @@
 # as explicit inputs instead.
 set -e
 
-readonly defaultVersion="$(until curl -sL "https://api.github.com/repos/labring/sealos/tags" | yq '.[].name' | grep -E "^v.+$"; do sleep 1; done | grep -E "v[0-9.]+$" | head -n 1 | cut -dv -f2)"
+# NOTE (fork fix): resolve tags with git ls-remote, not the GitHub REST API.
+# The API call above has no auth token, so a shared runner IP easily hits
+# the 60 req/hour unauthenticated rate limit; the until-loop then retries
+# forever with no timeout (run #7 hung 20+ min here). git ls-remote has
+# no such limit. The loop below is bounded: 10 tries, then fail loudly.
+fetch_sealos_tags() {
+  local tries=0
+  until git ls-remote --refs --sort="-version:refname" --tags "https://github.com/labring/sealos.git" | cut -d/ -f3- | grep -E "^v[0-9.]+$" > .tags; do
+    tries=$((tries + 1))
+    if [[ $tries -ge 10 ]]; then
+      echo "failed to list labring/sealos tags after 10 tries"
+      exit 1
+    fi
+    sleep 3
+  done
+}
+
+fetch_sealos_tags
+readonly defaultVersion="$(head -n 1 .tags | cut -dv -f2)"
 
 if [[ "${SEALOS_VERSION:-}" == latest ]]; then
   sealosVersion=latest
@@ -31,7 +49,7 @@ fi
 if [[ "$sealosVersion" == latest ]]; then
   echo "sealos latest for development"
 else
-  until curl -sL https://api.github.com/repos/labring/sealos/tags | yq .[].name | grep -E "^v.+$"; do sleep 3; done >.tags
+  fetch_sealos_tags
   if ! grep "$sealosVersion" .tags >/dev/null; then
     cat .tags
     echo "sealos version $sealosVersion does not exist"
