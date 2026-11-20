@@ -56,15 +56,19 @@ jobs:
       - name: Stage 0 - inspect the image (labels, size)
         run: |
           set -e
-          # sealos login takes only the registry as positional arg and -u/-p;
-          # --password-stdin is not a sealos flag (first trial failed on it).
-          sudo sealos login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+          # sealos login is buildah's login (lifecycle/pkg/buildah/login.go):
+          # RegisterFlags calls fs.SetInterspersed(false), so flags AFTER the
+          # registry are parsed as positional args ("too many arguments,
+          # login takes only 1 argument"). Flags must come BEFORE ghcr.io.
+          sudo sealos login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
           sudo sealos inspect "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}"
 
       - name: 'Stage A - install cluster from our rootfs image only (no CNI)'
         run: |
           set -e
-          sudo sealos run "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}" --single --debug
+          # --single is deprecated in sealos 5.1.2: with no --masters/--nodes
+          # it already defaults to single mode, so no flag is needed here.
+          sudo sealos run "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}" --debug
 
       - name: 'Stage A checks - control plane up, node exists (NotReady is EXPECTED without CNI)'
         run: |
