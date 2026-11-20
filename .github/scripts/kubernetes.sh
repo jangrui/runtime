@@ -26,7 +26,7 @@ readonly IMAGE_HUB_REGISTRY=${registry?}
 readonly IMAGE_HUB_REPO=${repo?}
 readonly IMAGE_HUB_USERNAME=${username?}
 readonly IMAGE_HUB_PASSWORD=${password?}
-readonly IMAGE_CACHE_NAME="ghcr.io/labring-actions/cache"
+readonly IMAGE_CACHE_NAME="ghcr.io/jangrui/cache"
 
 ROOT="/tmp/$(whoami)/build"
 PATCH="/tmp/$(whoami)/patch"
