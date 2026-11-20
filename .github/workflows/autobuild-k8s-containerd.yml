@@ -43,6 +43,10 @@ on:
     secrets:
       D_REGISTRY_TOKEN:
         required: false
+permissions:
+  contents: read
+  packages: write
+  issues: write
 env:
   part: ${{ inputs.part }}
   allBuild: ${{ inputs.allbuild }}
@@ -144,6 +148,8 @@ jobs:
       matrix: ${{ fromJson(needs.resolve-versions.outputs.matrix) }}
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
+      packages: write
       issues: write
     steps:
       - name: Checkout
