@@ -45,9 +45,10 @@ if [[ "${kube_major//./}" -ge 126 ]]; then
     # Fork fix: the upstream cache image no longer ships cri/.versions at this path.
     # A missing file used to make this script exit 0 silently, so the manifest was
     # never created/pushed while the job still reported success. Warn and continue
-    # instead; the containerd version is already pinned by the build (version.yaml).
+    # instead; the containerd version comes from the cache cri image build.
     if [ -f "$MOUNT_CRI/cri/.versions" ]; then
-      if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CONTAINERD | awk -F= '{print $NF}')" =~ v1\.([6-9]|[0-9][0-9])\.[0-9]+ ]]; then
+      # Accept v1.6+ and any v2+ (no pinned major line; see cache cri script).
+      if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CONTAINERD | awk -F= '{print $NF}')" =~ (v1\.([6-9]|[0-9][0-9])\.[0-9]+|v[2-9][0-9]*\.[0-9]+\.[0-9]+) ]]; then
         echo https://kubernetes.io/blog/2022/11/18/upcoming-changes-in-kubernetes-1-26/#cri-api-removal
         exit $ERR_CODE
       fi
@@ -57,7 +58,8 @@ if [[ "${kube_major//./}" -ge 126 ]]; then
     ;;
   docker)
     if [ -f "$MOUNT_CRI/cri/.versions" ]; then
-      if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CRIDOCKER | awk -F= '{print $NF}')" =~ v0\.[3-9]\.[0-9]+ ]]; then
+      # Accept v0.3+ and any v1+ (no pinned major line).
+      if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CRIDOCKER | awk -F= '{print $NF}')" =~ (v0\.[3-9]\.[0-9]+|v[1-9][0-9]*\.[0-9]+\.[0-9]+) ]]; then
         echo https://github.com/Mirantis/cri-dockerd/issues/125
         exit $ERR_CODE
       fi
