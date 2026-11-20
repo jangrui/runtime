@@ -42,15 +42,27 @@ if [[ "${kube_major//./}" -ge 126 ]]; then
   MOUNT_CRI=$(sudo buildah mount "$FROM_CRI")
   case $CRI_TYPE in
   containerd)
-    if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CONTAINERD | awk -F= '{print $NF}')" =~ v1\.([6-9]|[0-9][0-9])\.[0-9]+ ]]; then
-      echo https://kubernetes.io/blog/2022/11/18/upcoming-changes-in-kubernetes-1-26/#cri-api-removal
-      exit
+    # Fork fix: the upstream cache image no longer ships cri/.versions at this path.
+    # A missing file used to make this script exit 0 silently, so the manifest was
+    # never created/pushed while the job still reported success. Warn and continue
+    # instead; the containerd version is already pinned by the build (version.yaml).
+    if [ -f "$MOUNT_CRI/cri/.versions" ]; then
+      if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CONTAINERD | awk -F= '{print $NF}')" =~ v1\.([6-9]|[0-9][0-9])\.[0-9]+ ]]; then
+        echo https://kubernetes.io/blog/2022/11/18/upcoming-changes-in-kubernetes-1-26/#cri-api-removal
+        exit $ERR_CODE
+      fi
+    else
+      echo "WARNING::cri/.versions not found in cache image, skipping containerd version check"
     fi
     ;;
   docker)
-    if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CRIDOCKER | awk -F= '{print $NF}')" =~ v0\.[3-9]\.[0-9]+ ]]; then
-      echo https://github.com/Mirantis/cri-dockerd/issues/125
-      exit
+    if [ -f "$MOUNT_CRI/cri/.versions" ]; then
+      if ! [[ "$(sudo cat "$MOUNT_CRI"/cri/.versions | grep CRIDOCKER | awk -F= '{print $NF}')" =~ v0\.[3-9]\.[0-9]+ ]]; then
+        echo https://github.com/Mirantis/cri-dockerd/issues/125
+        exit $ERR_CODE
+      fi
+    else
+      echo "WARNING::cri/.versions not found in cache image, skipping cri-dockerd version check"
     fi
     ;;
   esac
@@ -112,12 +124,11 @@ for IMAGE_NAME in "${IMAGE_PUSH_NAME[@]}"; do
     echo "${IMAGE_NAME%:*}:$tag"
   done | xargs sudo buildah manifest create --all "mf:${KUBE%+*}-$SEALOS" || exit $ERR_CODE
   if [[ $(sudo buildah inspect "mf:${KUBE%+*}-$SEALOS" | yq .manifests[].platform.architecture | uniq | grep 64 -c) -eq 2 ]]; then
-    if sudo buildah login -u labring -p "$1" docker.io; then
-      IMAGE_NAME="docker.io/labring/${IMAGE_NAME##*/}"
-    else
-      echo "warning: Please input REGISTRY_TOKEN for docker.io"
-      continue
-    fi
+    # Fork fix: upstream pushes the combined manifest to docker.io/labring, which needs
+    # D_REGISTRY_TOKEN and the labring namespace (this fork owns neither); without that
+    # token it printed a warning and skipped the push entirely, so no combined tag
+    # (e.g. v1.33.6-5.1.1) was ever published. Push it to GHCR instead, where this
+    # job is already logged in above.
     sudo buildah manifest push --rm --all "mf:${KUBE%+*}-$SEALOS" "docker://$IMAGE_NAME" && echo "$IMAGE_NAME push success"
   else
     sudo buildah manifest inspect "mf:${KUBE%+*}-$SEALOS" | yq -CP
