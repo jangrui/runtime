@@ -17,7 +17,7 @@ env:
   part: ${{ github.event.inputs.part }}
   allBuild: ${{ github.event.inputs.allbuild }}
   registry: ghcr.io
-  repo: ${{ github.repository }}
+  repo: jangrui  # fork: image name is $registry/$repo/$IMAGE_KUBE, so repo must be the owner only (jangrui/runtime would give a 3-level name)
   sealosPatch: ${{ github.event.inputs.sealosPatch }}
   criType: cri-o
 jobs:
@@ -98,6 +98,8 @@ jobs:
       matrix: ${{ fromJson(needs.resolve-versions.outputs.matrix) }}
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
+      packages: write
       issues: write
     steps:
       - name: Checkout
