@@ -142,17 +142,25 @@ jobs:
       # then prints the containerd journal for the hang window. The dump
       # shows exactly where the Stop RPC is blocked (shim kill? sandbox
       # stop? CNI teardown? exit-event wait?).
+      #
+      # LESSON from smoke #12 (run 44813025091): the detector must watch the
+      # CONTAINERD journal for `StopPodSandbox for ... failed`, NOT the
+      # kubelet journal for `StopPodSandbox from runtime service failed` —
+      # in #12 the kubelet journal had no such line at all in 15 min while
+      # containerd logged 10 StopPodSandbox failures. #12 also proved the
+      # block is at CNI teardown (calico DEL plugin killed, "signal: killed"),
+      # not at container kill / rootfs umount (no such lines in the journal).
       - name: Cleanup - reset the cluster (with StopPodSandbox hang diagnostics)
         if: always()
         run: |
           sudo sealos reset --force > /tmp/reset.log 2>&1 &
           RESET_PID=$!
-          echo "reset started, pid $RESET_PID; watching kubelet log for the StopPodSandbox hang"
+          echo "reset started, pid $RESET_PID; watching containerd log for the StopPodSandbox hang"
           DUMPED=0
           for i in $(seq 1 90); do
             if ! kill -0 $RESET_PID 2>/dev/null; then echo "reset finished before hang was seen"; break; fi
-            if sudo journalctl -u kubelet --since "10 minutes ago" --no-pager 2>/dev/null | grep -q "StopPodSandbox from runtime service failed"; then
-              echo "hang detected in kubelet log; waiting 30s so the block is steady, then SIGUSR1 to containerd"
+            if sudo journalctl -u containerd --since "10 minutes ago" --no-pager 2>/dev/null | grep -q 'StopPodSandbox for .* failed'; then
+              echo "hang detected in containerd log; waiting 30s so the block is steady, then SIGUSR1 to containerd"
               sleep 30
               if kill -0 $RESET_PID 2>/dev/null; then
                 CTD_PID=$(pidof containerd | awk '{print $1}')
@@ -172,9 +180,10 @@ jobs:
           done
           wait $RESET_PID; RESET_RC=$?
           echo "reset exit code: $RESET_RC"
+          echo "===== kubelet journal presence check ====="
+          sudo journalctl -u kubelet --since "15 minutes ago" --no-pager | wc -l
+          sudo journalctl -u kubelet --since "15 minutes ago" --no-pager | head -n 5
           echo "===== containerd journal, reset window (last 15 min) ====="
-          sudo journalctl -u containerd --since "15 minutes ago" --no-pager | grep -E "StopPodSandbox|Stop container|Kill container|failed to kill|waiting for container|rootfs umount|failed to stop|Teardown|TearDown|goroutine stack dump" | tail -n 120
-          echo "===== kubelet StopPodSandbox failures, reset window ====="
-          sudo journalctl -u kubelet --since "15 minutes ago" --no-pager | grep -E "StopPodSandbox|RemovePodSandbox" | tail -n 40
-          echo "===== reset.log tail ====="
-          tail -n 30 /tmp/reset.log || true
+          sudo journalctl -u containerd --since "15 minutes ago" --no-pager | grep -E "StopPodSandbox|Stop container|Kill container|failed to kill|waiting for container|rootfs umount|failed to stop|Teardown|TearDown|goroutine stack dump|signal: killed" | tail -n 150
+          echo "===== full reset.log ====="
+          cat /tmp/reset.log || true
