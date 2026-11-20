@@ -1,0 +1,105 @@
+name: k8s autobuild on issue comment
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  check-accepted:
+    runs-on: ubuntu-latest
+    permissions: read-all
+    outputs:
+      has_accepted: ${{ steps.check-label.outputs.has_accepted }}
+    steps:
+      - name: Check for 'accepted' label
+        id: check-label
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number
+            });
+            const hasAccepted = issue.labels.some(label =>
+              label.name.toLowerCase() === 'accepted'
+            );
+            core.setOutput('has_accepted', hasAccepted.toString());
+
+  parse-command:
+    needs: check-accepted
+    if: needs.check-accepted.outputs.has_accepted == 'true' && startsWith(github.event.comment.body, '/imagebuild_k8s')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    outputs:
+      kubeVersion: ${{ steps.parse.outputs.kubeVersion }}
+      sealosVersion: ${{ steps.parse.outputs.sealosVersion }}
+      part: ${{ steps.parse.outputs.part }}
+    steps:
+      - name: Parse /imagebuild_k8s command
+        id: parse
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const body = (context.payload.comment.body || '').trim();
+            const parts = body.split(/\s+/);
+            const fail = async (msg) => {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body: msg
+              });
+              core.setFailed(msg);
+            };
+            let kube = parts[1] || '';
+            if (!kube) {
+              await fail('❌ 用法：`/imagebuild_k8s <k8s版> [sealos版]`，例如 `/imagebuild_k8s 1.33.6 5.1.1`');
+              return;
+            }
+            kube = kube.replace(/^v/, '');
+            if (!/^1\.(33|34|35|36|37)\.\d+$/.test(kube)) {
+              await fail('❌ 不支持的 K8s 版本 `' + kube + '`，仅支持 1.33–1.37 的补丁版，例如 1.33.6、v1.34.13。');
+              return;
+            }
+            let sealos = (parts[2] || 'latest').replace(/^v/, '');
+            if (sealos !== 'latest' && !/^\d+\.\d+\.\d+/.test(sealos)) {
+              await fail('❌ 不支持的 Sealos 版本 `' + sealos + '`，请用例如 5.1.1，或留空取 latest。');
+              return;
+            }
+            const minor = kube.split('.')[1];
+            const part = minor === '33' ? '5' : '6';
+            core.setOutput('kubeVersion', kube);
+            core.setOutput('sealosVersion', sealos);
+            core.setOutput('part', part);
+
+  start-build:
+    needs: parse-command
+    uses: ./.github/workflows/autobuild-k8s-containerd.yml
+    secrets: inherit
+    with:
+      part: ${{ needs.parse-command.outputs.part }}
+      allbuild: false
+      kubeVersion: ${{ needs.parse-command.outputs.kubeVersion }}
+      sealosVersion: ${{ needs.parse-command.outputs.sealosVersion }}
+
+  reply:
+    needs:
+      - parse-command
+      - start-build
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reply accepted
+        uses: actions/github-script@v6
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: '✅ 已接受构建：K8s `' + '${{ needs.parse-command.outputs.kubeVersion }}' + '`，Sealos `' + '${{ needs.parse-command.outputs.sealosVersion }}' + '`，part `' + '${{ needs.parse-command.outputs.part }}' + '`。\n\n构建在 GitHub Actions 里跑，进度见本次 workflow 运行的 Actions 页。'
+            });
