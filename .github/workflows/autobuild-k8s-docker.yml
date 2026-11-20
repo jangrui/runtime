@@ -27,7 +27,7 @@ jobs:
       sealoslatest: ${{ steps.set-sealoslatest.outputs.sealoslatest }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
       - name: Set sealos LatestVersion
         id: set-sealoslatest
         run: |
@@ -43,7 +43,7 @@ jobs:
       matrix: ${{ steps.set-versions.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
       - name: Resolve Versions
         id: set-versions
         run: .github/scripts/versions/versions_arch.sh
@@ -57,7 +57,7 @@ jobs:
       matrix: ${{ steps.set-versions.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
       - name: Resolve Versions
         id: set-versions
         run: .github/scripts/versions/versions.sh
@@ -73,7 +73,7 @@ jobs:
       matrix: ${{ fromJson(needs.resolve-versions-arch.outputs.matrix) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
 
       - name: Download tools and sealos
         run: .github/scripts/download.sh
@@ -101,7 +101,7 @@ jobs:
       issues: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
       - name: Download tools and sealos
         run: .github/scripts/download.sh
       - name: Manifest Image
