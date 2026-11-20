@@ -316,7 +316,17 @@ echo "SEALOS_STATUS => $SEALOS_RUN"
         sudo sealos login -u "$IMAGE_HUB_USERNAME" -p "$IMAGE_HUB_PASSWORD" "$IMAGE_HUB_REGISTRY"
         while read -r IMAGE_NAME; do
           sudo sealos tag "$IMAGE_BUILD" "$IMAGE_NAME"
-          until sudo sealos push "$IMAGE_NAME"; do sleep 3; done
+          # Bounded retry: upstream retried forever (until ...; do sleep 3; done),
+          # so a denied push looped indefinitely. Fail fast after 5 attempts.
+          push_attempt=0
+          until sudo sealos push "$IMAGE_NAME"; do
+            push_attempt=$((push_attempt + 1))
+            if [ "$push_attempt" -ge 5 ]; then
+              echo "ERROR::sealos push failed after 5 attempts for $IMAGE_NAME"
+              exit $ERR_CODE
+            fi
+            sleep 3
+          done
         done <"/tmp/$IMAGE_HUB_REGISTRY.v$KUBE-$ARCH.images"
         sudo sealos logout "$IMAGE_HUB_REGISTRY"
       fi
