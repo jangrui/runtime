@@ -1,0 +1,111 @@
+# Smoke test for the kubernetes rootfs image built by this repo.
+#
+# Two stages, with separate pass criteria (do not collapse them):
+#   Stage A: our rootfs image ALONE (no CNI). The image contains only the
+#     control plane + containerd, so a node is expected to stay NotReady and
+#     CoreDNS / any workload pod is expected to stay Pending here.
+#     Pass = kubeadm init succeeded, apiserver answers, kubelet and
+#     containerd are running, the node exists.
+#   Stage B: full cluster, after applying the calico CNI image (a separate
+#     upstream image, labring/calico). Only here do node Ready, CoreDNS
+#     Running and an nginx pod make sense. A calico failure is a calico
+#     pairing problem, not a rootfs problem, and must be reported as such.
+#
+# Triggered manually only (workflow_dispatch), so a build never burns
+# runner minutes by accident. First trial target: v1.33.6-5.1.1.
+name: test k8s rootfs (smoke)
+
+on:
+  workflow_dispatch:
+    inputs:
+      kube_tag:
+        description: 'Rootfs image tag to test, e.g. v1.33.6-5.1.1'
+        required: true
+        default: 'v1.33.6-5.1.1'
+      sealos_version:
+        description: 'Sealos version to install, e.g. 5.1.2'
+        required: true
+        default: '5.1.2'
+      calico_version:
+        description: 'labring/calico version for stage B (newest labring-built tag on Docker Hub, 2026-11-20: v3.28.1)'
+        required: true
+        default: 'v3.28.1'
+      run_stage_b:
+        description: 'Run stage B (calico + nginx) after stage A'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Install sealos
+        run: |
+          set -e
+          wget -q "https://github.com/labring/sealos/releases/download/v${{ inputs.sealos_version }}/sealos_${{ inputs.sealos_version }}_linux_amd64.tar.gz"
+          tar zxvf "sealos_${{ inputs.sealos_version }}_linux_amd64.tar.gz" sealos
+          sudo mv sealos /usr/local/bin/sealos
+          sealos version
+
+      - name: Stage 0 - inspect the image (labels, size)
+        run: |
+          set -e
+          echo "${{ secrets.GITHUB_TOKEN }}" | sudo sealos login ghcr.io -u "${{ github.actor }}" --password-stdin
+          sudo sealos inspect "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}"
+
+      - name: 'Stage A - install cluster from our rootfs image only (no CNI)'
+        run: |
+          set -e
+          sudo sealos run "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}" --single --debug
+
+      - name: 'Stage A checks - control plane up, node exists (NotReady is EXPECTED without CNI)'
+        run: |
+          set -e
+          export KUBECONFIG=/etc/kubernetes/admin.conf
+          sudo kubectl version
+          sudo kubectl get nodes -o wide
+          sudo kubectl get pods -n kube-system -o wide
+          sudo systemctl is-active kubelet containerd
+          # exactly one node must exist; do NOT require Ready here (no CNI yet)
+          test "$(sudo kubectl get nodes --no-headers | wc -l)" = "1"
+          # control-plane static pods must be Running; CoreDNS is allowed to stay Pending
+          for comp in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+            sudo kubectl wait --for=condition=Ready "pod" -n kube-system -l "component=$comp" --timeout=300s
+          done
+          echo "Stage A PASSED: control plane is up from our rootfs image alone"
+
+      - name: 'Stage B - install calico (CNI)'
+        if: inputs.run_stage_b
+        run: |
+          set -e
+          sudo sealos run "labring/calico:${{ inputs.calico_version }}"
+
+      - name: 'Stage B checks - node Ready, CoreDNS Running, nginx pod serves traffic'
+        if: inputs.run_stage_b
+        run: |
+          set -e
+          export KUBECONFIG=/etc/kubernetes/admin.conf
+          # single-node control plane is tainted; remove the taint so nginx can schedule
+          sudo kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
+          sudo kubectl wait --for=condition=Ready node --all --timeout=600s
+          sudo kubectl wait --for=condition=Ready pod -n kube-system -l k8s-app=kube-dns --timeout=600s
+          sudo kubectl wait --for=condition=Ready pod -n kube-system -l k8s-app=calico-node --timeout=600s
+          sudo kubectl run nginx-test --image=nginx:1.27-alpine --port=80
+          sudo kubectl wait --for=condition=Ready pod/nginx-test --timeout=300s
+          # CNI must have assigned the pod an IP
+          sudo kubectl get pod nginx-test -o wide
+          # the pod itself must answer HTTP on localhost
+          sudo kubectl exec nginx-test -- wget -qO- http://localhost | head -c 200
+          echo
+          echo "Stage B PASSED: CNI works and a workload pod serves traffic"
+
+      - name: Cleanup - reset the cluster
+        if: always()
+        run: |
+          sudo sealos reset --force || true
