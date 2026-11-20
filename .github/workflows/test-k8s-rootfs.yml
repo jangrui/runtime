@@ -63,6 +63,22 @@ jobs:
           sudo sealos login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
           sudo sealos inspect "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}"
 
+      - name: 'Stage A prep - remove preinstalled containerd/docker (the image check.sh refuses a host that already has them)'
+        run: |
+          set -e
+          # GitHub-hosted runners ship containerd/docker preinstalled; the
+          # rootfs image's check.sh fails the install with "containerd is
+          # installed ... please uninstall it first". Remove them first;
+          # sealos installs its own containerd from the rootfs image.
+          sudo systemctl stop containerd docker || true
+          sudo apt-get purge -y containerd containerd.io docker.io docker-ce docker-ce-cli docker-buildx-plugin docker-compose-plugin || true
+          sudo apt-get autoremove -y || true
+          sudo rm -rf /var/lib/containerd /etc/containerd /var/run/docker.sock /var/lib/docker
+          if command -v containerd || command -v docker; then
+            echo "ERROR: containerd/docker still present after purge" >&2
+            exit 1
+          fi
+
       - name: 'Stage A - install cluster from our rootfs image only (no CNI)'
         run: |
           set -e
