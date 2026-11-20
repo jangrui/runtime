@@ -56,7 +56,9 @@ jobs:
       - name: Stage 0 - inspect the image (labels, size)
         run: |
           set -e
-          echo "${{ secrets.GITHUB_TOKEN }}" | sudo sealos login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # sealos login takes only the registry as positional arg and -u/-p;
+          # --password-stdin is not a sealos flag (first trial failed on it).
+          sudo sealos login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
           sudo sealos inspect "ghcr.io/jangrui/kubernetes:${{ inputs.kube_tag }}"
 
       - name: 'Stage A - install cluster from our rootfs image only (no CNI)'
