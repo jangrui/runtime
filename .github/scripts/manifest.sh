@@ -24,6 +24,29 @@ fi
 readonly sealoslatest="${sealoslatest:-${IMAGE_TAG#*-}}"
 readonly SEALOS=${sealoslatest?}
 readonly SEALOS_PATCH="${sealosPatch:-}"
+
+# NOTE (fork fix): resolve the newest sealos tag with git ls-remote, not the
+# GitHub REST API (see .github/scripts/versions/versions_sealos.sh).
+# The REST call has no auth token, so a shared runner IP easily hits the
+# 60 req/hour unauthenticated rate limit; curl still exits 0 on HTTP 403,
+# so the until-loop exits at once, grep finds no tarball_url, the check
+# yields an empty string and the bare tags are silently skipped — the K3S
+# part 5 re-run missed 4 bare tags this way. git ls-remote has no such
+# limit. Bounded: 10 tries, then empty (bare tags skipped, same as before;
+# the -5.1.2 tags are unaffected).
+latest_sealos_version() {
+  local tags tries=0
+  until tags=$(git ls-remote --refs --sort="-version:refname" --tags "https://github.com/labring/sealos.git" | cut -d/ -f3- | grep -E "^v[0-9.]+$"); do
+    tries=$((tries + 1))
+    if [[ $tries -ge 10 ]]; then
+      echo "failed to list labring/sealos tags after 10 tries" >&2
+      return 0
+    fi
+    sleep 3
+  done
+  echo "$tags" | head -n 1 | cut -dv -f2
+}
+
 readonly SEALOS_XYZ="${SEALOS%%-*}"
 if [[ "${SEALOS_XYZ//./}" -le 433 ]] && [[ $KUBE_TYPE == k3s ]] && [[ -z "$SEALOS_PATCH" ]]; then
   echo "INFO::skip $KUBE(build for k3s) when $SEALOS(sealos<=4.3.3)"
@@ -106,9 +129,7 @@ if ! [[ "$SEALOS" =~ ^[0-9\.]+[0-9]$ ]] || [[ -n "$SEALOS_PATCH" ]]; then
   )
 else
   IMAGE_TAGS="v${KUBE%+*}-$SEALOS-amd64,v${KUBE%+*}-$SEALOS-arm64"
-  if [[ "$SEALOS" == "$(
-    until curl -sL "https://api.github.com/repos/labring/sealos/releases/latest"; do sleep 3; done | grep tarball_url | awk -F\" '{print $(NF-1)}' | awk -F/ '{print $NF}' | cut -dv -f2
-  )" ]]; then
+  if [[ "$SEALOS" == "$(latest_sealos_version)" ]]; then
     IMAGE_PUSH_NAME=(
       "$IMAGE_HUB_REGISTRY/$IMAGE_HUB_REPO/$IMAGE_KUBE:v${KUBE%+*}"
       "$IMAGE_HUB_REGISTRY/$IMAGE_HUB_REPO/$IMAGE_KUBE:v${KUBE%+*}-$SEALOS"
