@@ -4,7 +4,8 @@ on:
     types: [created]
 permissions:
   contents: read
-  issues: write
+  packages: write
+  issues: write  # reusable workflow (autobuild-k8s-containerd.yml) requests packages: write; the caller must grant at least that much, otherwise startup fails with "only allowed 'packages: none'"
 jobs:
   check-accepted:
     runs-on: ubuntu-latest
